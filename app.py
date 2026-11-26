@@ -1,340 +1,70 @@
 
 import streamlit as st
-import time
-from google import genai
 
-# =====================================================
-# 1. KONFIGURASI APLIKASI
-# =====================================================
+from config import APP_NAME
+from styles import load_styles
+from components import (
+    render_header,
+    render_feature_card,
+    render_footer
+)
+
+from ai_engine import generate_answer
+from chat_manager import (
+    initialize_chat,
+    add_message,
+    get_history,
+    clear_chat
+)
+
+from tools import run_feature, translate_text
+
+
+# ==========================================
+# KONFIGURASI
+# ==========================================
 
 st.set_page_config(
-    page_title="Smart Daily Assistant",
+    page_title=APP_NAME,
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# =====================================================
-# 2. DESAIN / CSS
-# =====================================================
-
-st.markdown("""
-<style>
-
-/* Background utama */
-.stApp {
-    background: linear-gradient(135deg, #0b1020 0%, #121a32 55%, #17132e 100%);
-    color: #f8fafc;
-}
-
-/* Konten utama */
-.block-container {
-    max-width: 1100px;
-    padding-top: 2rem;
-    padding-bottom: 3rem;
-}
-
-/* Sidebar */
-[data-testid="stSidebar"] {
-    background: #10182b;
-    border-right: 1px solid #273451;
-}
-
-/* Judul */
-.hero-title {
-    font-size: clamp(30px, 5vw, 48px);
-    font-weight: 800;
-    line-height: 1.2;
-    background: linear-gradient(90deg, #a78bfa, #60a5fa, #67e8f9);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 10px;
-}
-
-.hero-subtitle {
-    color: #aab7d0;
-    font-size: 16px;
-    line-height: 1.7;
-}
-
-/* Kartu */
-.feature-card {
-    background: linear-gradient(145deg, #1b2944, #182038);
-    border: 1px solid #334466;
-    border-radius: 18px;
-    padding: 20px;
-    min-height: 145px;
-    transition: 0.2s;
-}
-
-.feature-card:hover {
-    border-color: #8b5cf6;
-    transform: translateY(-3px);
-}
-
-.feature-icon {
-    font-size: 27px;
-    margin-bottom: 10px;
-}
-
-.feature-title {
-    color: #ffffff;
-    font-size: 16px;
-    font-weight: 700;
-    margin-bottom: 7px;
-}
-
-.feature-desc {
-    color: #aab7d0;
-    font-size: 13px;
-    line-height: 1.5;
-}
-
-/* Tombol */
-.stButton > button {
-    border-radius: 12px;
-    min-height: 45px;
-    border: 1px solid #465578;
-    background: #202e4b;
-    color: white;
-    transition: 0.2s;
-}
-
-.stButton > button:hover {
-    background: #49358a;
-    border-color: #a78bfa;
-    color: white;
-}
-
-/* Input */
-.stChatInput textarea {
-    border-radius: 15px;
-}
-
-/* Pesan chat */
-[data-testid="stChatMessage"] {
-    background: rgba(32, 46, 75, 0.65);
-    border: 1px solid #344563;
-    border-radius: 16px;
-    padding: 12px;
-    margin-bottom: 12px;
-}
-
-/* Garis */
-hr {
-    border-color: #334155;
-}
-
-/* Status */
-.status-box {
-    background: #172b38;
-    border: 1px solid #285a55;
-    border-radius: 12px;
-    padding: 12px;
-    color: #a7f3d0;
-    font-size: 13px;
-}
-
-/* Footer */
-.footer {
-    text-align: center;
-    color: #8492ad;
-    font-size: 12px;
-    padding: 25px 0 5px 0;
-}
-
-/* HP */
-@media (max-width: 640px) {
-    .block-container {
-        padding: 1rem 0.8rem 2rem 0.8rem;
-    }
-
-    .feature-card {
-        padding: 14px;
-        min-height: 130px;
-    }
-}
-
-</style>
-""", unsafe_allow_html=True)
+load_styles()
+initialize_chat()
 
 
-# =====================================================
-# 3. MENGHUBUNGKAN GEMINI AI
-# =====================================================
-
-try:
-    API_KEY = st.secrets["GEMINI_API_KEY"]
-
-    client = genai.Client(
-        api_key=API_KEY
-    )
-
-except Exception:
-    st.error(
-        "API Key belum ditemukan. "
-        "Periksa file .streamlit/secrets.toml"
-    )
-    st.stop()
-
-
-# =====================================================
-# 4. PENGATURAN MODEL AI
-# =====================================================
-
-MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.5-flash-lite"
-]
-
-SYSTEM_INSTRUCTION = """
-Kamu adalah Smart Daily Assistant,
-asisten kecerdasan buatan yang ramah,
-pintar, sopan, dan membantu pengguna.
-
-Tugas utama kamu:
-
-1. Membantu mahasiswa memahami pelajaran.
-2. Membantu membuat tugas dan laporan.
-3. Menjelaskan materi dengan bahasa sederhana.
-4. Membantu menulis dan memperbaiki program.
-5. Membantu menerjemahkan bahasa.
-6. Memberikan ide dan inspirasi.
-7. Menjawab pertanyaan sehari-hari.
-
-Gunakan bahasa Indonesia sebagai bahasa utama.
-
-Jika pengguna menggunakan bahasa lain,
-sesuaikan bahasa jawaban dengan pengguna.
-
-Berikan jawaban yang jelas, terstruktur,
-mudah dipahami, dan tidak bertele-tele.
-
-Jika membuat kode program,
-berikan kode lengkap yang dapat dijalankan.
-
-Jika menjelaskan sesuatu yang sulit,
-gunakan contoh sederhana.
-
-Jangan mengarang fakta jika tidak yakin.
-"""
-
-
-# =====================================================
-# 5. RIWAYAT PERCAKAPAN
-# =====================================================
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "pending_prompt" not in st.session_state:
-    st.session_state.pending_prompt = None
-
-
-# =====================================================
-# 6. FUNGSI MENGIRIM PERTANYAAN KE AI
-# =====================================================
-
-def tanya_ai(riwayat):
-
-    error_terakhir = None
-
-    for model in MODELS:
-
-        # Maksimal dua percobaan per model
-        for percobaan in range(2):
-
-            try:
-
-                response = client.models.generate_content(
-                    model=model,
-                    contents=riwayat,
-                    config={
-                        "system_instruction": SYSTEM_INSTRUCTION
-                    }
-                )
-
-                if response.text:
-                    return response.text, model
-
-                raise Exception("AI tidak memberikan jawaban.")
-
-            except Exception as e:
-
-                error_terakhir = e
-                pesan = str(e).lower()
-
-                # Error yang mungkin sementara
-                error_sementara = any(
-                    kode in pesan
-                    for kode in [
-                        "503",
-                        "429",
-                        "500",
-                        "502",
-                        "504",
-                        "unavailable",
-                        "resource_exhausted",
-                        "overloaded",
-                        "deadline_exceeded"
-                    ]
-                )
-
-                # Coba lagi jika gangguan sementara
-                if error_sementara and percobaan == 0:
-
-                    time.sleep(2)
-
-                    continue
-
-                # Jika gagal, lanjut ke model cadangan
-                break
-
-    raise Exception(
-        f"Semua model AI gagal digunakan. "
-        f"Detail: {error_terakhir}"
-    )
-
-
-# =====================================================
-# 7. SIDEBAR
-# =====================================================
+# ==========================================
+# SIDEBAR
+# ==========================================
 
 with st.sidebar:
 
     st.markdown(
-        """
-        <div style="text-align:center; padding:15px 5px;">
-            <div style="font-size:55px;">🤖</div>
-            <h2 style="color:white; margin-bottom:0;">
-                Smart Daily
-            </h2>
-            <h3 style="color:#a78bfa; margin-top:0;">
-                Assistant
-            </h3>
-            <p style="color:#9caec9; font-size:12px;">
-                Your AI Personal Assistant
-            </p>
-        </div>
-        """,
+        "<h1 style='text-align:center;'>🔴 SDA</h1>",
         unsafe_allow_html=True
     )
 
+    st.markdown(
+        "<h3 style='text-align:center;'>Smart Daily Assistant</h3>",
+        unsafe_allow_html=True
+    )
+
+    st.caption("Your Personal AI Assistant")
+
     st.divider()
 
-    st.markdown("### 🧭 Menu Utama")
+    st.markdown("### 📊 Dashboard")
 
-    st.markdown(
-        """
-        <div style="color:#cbd5e1; line-height:2.2;">
-        💬 Chat AI<br>
-        📚 Asisten Belajar<br>
-        📝 Pembuat Laporan<br>
-        🌐 Penerjemah Bahasa<br>
-        💡 Ide dan Inspirasi
-        </div>
-        """,
-        unsafe_allow_html=True
+    st.metric(
+        "Total Pertanyaan",
+        st.session_state.total_questions
+    )
+
+    st.metric(
+        "Total Pesan",
+        len(st.session_state.messages)
     )
 
     st.divider()
@@ -342,360 +72,414 @@ with st.sidebar:
     st.markdown("### ⚙️ Pengaturan")
 
     if st.button(
-        "🗑️ Hapus Semua Percakapan",
+        "🗑️ Hapus Riwayat Chat",
         use_container_width=True
     ):
-
-        st.session_state.messages = []
+        clear_chat()
         st.rerun()
 
-    st.markdown("### 📊 Statistik")
+    st.markdown("### 🟢 Status Sistem")
 
-    st.metric(
-        "Jumlah Pesan",
-        len(st.session_state.messages)
-    )
-
-    st.markdown(
-        """
-        <div class="status-box">
-        🟢 Aplikasi siap digunakan
-        <br><br>
-        Gemini AI Connection
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.success("Aplikasi siap digunakan")
 
     st.divider()
 
-    st.caption("Dibuat menggunakan Python")
-    st.caption("Streamlit + Google Gemini AI")
-    st.caption("Smart Daily Assistant © 2026")
+    st.caption("Python Application")
+    st.caption("Gemini AI Integration")
+    st.caption("Version 2.0.0")
 
 
-# =====================================================
-# 8. HEADER UTAMA
-# =====================================================
+# ==========================================
+# HEADER
+# ==========================================
 
-st.markdown(
-    """
-    <div style="margin-bottom:25px;">
-        <div class="hero-title">
-            Smart Daily Assistant ✨
-        </div>
-
-        <div class="hero-subtitle">
-            Teman pintar untuk belajar, bekerja,
-            mencari inspirasi, dan membantu aktivitas
-            sehari-hari.
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-st.divider()
+render_header()
 
 
-# =====================================================
-# 9. HALAMAN SELAMAT DATANG
-# =====================================================
+# ==========================================
+# NAVIGASI FITUR
+# ==========================================
 
-if len(st.session_state.messages) == 0:
+tabs = st.tabs([
+    "🏠 Beranda",
+    "💬 Chat AI",
+    "📚 Belajar",
+    "📝 Laporan",
+    "📄 Ringkas",
+    "🌐 Terjemahan",
+    "💻 Coding"
+])
+
+
+# ==========================================
+# BERANDA
+# ==========================================
+
+with tabs[0]:
+
+    st.markdown("## 👋 Selamat Datang!")
 
     st.markdown(
-        """
-        <div style="
-            background:linear-gradient(120deg,#263967,#49358a,#174a67);
-            border:1px solid #596b9d;
-            border-radius:22px;
-            padding:28px;
-            margin-bottom:25px;
-        ">
-            <div style="font-size:35px;">👋</div>
-
-            <h2 style="color:white;">
-                Halo! Selamat datang.
-            </h2>
-
-            <p style="
-                color:#dbeafe;
-                line-height:1.8;
-                font-size:15px;
-            ">
-                Saya Smart Daily Assistant,
-                asisten AI yang siap membantu kebutuhan
-                kamu kapan saja.
-                Mulai percakapan dengan menuliskan
-                pertanyaan di bawah.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
+        "Apa yang ingin kamu lakukan hari ini?"
     )
 
-    st.markdown("### 🚀 Apa yang ingin kamu lakukan?")
+    st.markdown("---")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
-
-        st.markdown(
-            """
-            <div class="feature-card">
-                <div class="feature-icon">📚</div>
-                <div class="feature-title">
-                    Asisten Belajar
-                </div>
-                <div class="feature-desc">
-                    Memahami pelajaran dan materi kuliah
-                    dengan penjelasan sederhana.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        render_feature_card(
+            "💬",
+            "Chat AI",
+            "Bertanya dan berdiskusi dengan kecerdasan buatan."
         )
-
-        if st.button(
-            "Mulai Belajar",
-            key="belajar",
-            use_container_width=True
-        ):
-            st.session_state.pending_prompt = (
-                "Bantu saya belajar. "
-                "Jelaskan materi dengan bahasa sederhana."
-            )
-            st.rerun()
 
     with col2:
-
-        st.markdown(
-            """
-            <div class="feature-card">
-                <div class="feature-icon">📝</div>
-                <div class="feature-title">
-                    Pembuat Laporan
-                </div>
-                <div class="feature-desc">
-                    Membantu menyusun laporan,
-                    makalah, dan tugas.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        render_feature_card(
+            "📚",
+            "Asisten Belajar",
+            "Membantu memahami materi perkuliahan."
         )
-
-        if st.button(
-            "Buat Laporan",
-            key="laporan",
-            use_container_width=True
-        ):
-            st.session_state.pending_prompt = (
-                "Bantu saya membuat laporan "
-                "dengan susunan yang rapi."
-            )
-            st.rerun()
-
-    col3, col4 = st.columns(2)
 
     with col3:
-
-        st.markdown(
-            """
-            <div class="feature-card">
-                <div class="feature-icon">🌐</div>
-                <div class="feature-title">
-                    Penerjemah Bahasa
-                </div>
-                <div class="feature-desc">
-                    Menerjemahkan berbagai bahasa
-                    dengan mudah.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        render_feature_card(
+            "📝",
+            "Pembuat Laporan",
+            "Membantu menyusun tugas dan laporan."
         )
 
-        if st.button(
-            "Terjemahkan",
-            key="translate",
-            use_container_width=True
-        ):
-            st.session_state.pending_prompt = (
-                "Bantu saya menerjemahkan bahasa "
-                "Inggris ke bahasa Indonesia."
-            )
-            st.rerun()
+    col4, col5, col6 = st.columns(3)
 
     with col4:
-
-        st.markdown(
-            """
-            <div class="feature-card">
-                <div class="feature-icon">💡</div>
-                <div class="feature-title">
-                    Ide dan Inspirasi
-                </div>
-                <div class="feature-desc">
-                    Mencari ide kreatif untuk
-                    berbagai kebutuhan.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        render_feature_card(
+            "📄",
+            "Perangkum Teks",
+            "Mengubah materi panjang menjadi ringkasan."
         )
 
-        if st.button(
-            "Cari Inspirasi",
-            key="inspirasi",
-            use_container_width=True
-        ):
-            st.session_state.pending_prompt = (
-                "Berikan saya ide kreatif "
-                "yang bermanfaat dalam kehidupan sehari-hari."
-            )
-            st.rerun()
+    with col5:
+        render_feature_card(
+            "🌐",
+            "Penerjemah",
+            "Menerjemahkan berbagai bahasa."
+        )
 
-    st.markdown("### 💬 Contoh pertanyaan")
+    with col6:
+        render_feature_card(
+            "💻",
+            "Asisten Coding",
+            "Membantu membuat dan memperbaiki program."
+        )
 
-    contoh = [
-        "Apa itu Artificial Intelligence?",
-        "Buatkan jadwal belajar mahasiswa.",
-        "Jelaskan cara kerja Python.",
-        "Buatkan ringkasan tentang teknologi."
-    ]
+    st.markdown("---")
 
-    cols = st.columns(2)
+    st.markdown("### ✨ Mengapa menggunakan aplikasi ini?")
 
-    for i, pertanyaan in enumerate(contoh):
-
-        with cols[i % 2]:
-
-            if st.button(
-                pertanyaan,
-                key=f"contoh_{i}",
-                use_container_width=True
-            ):
-
-                st.session_state.pending_prompt = pertanyaan
-                st.rerun()
+    st.info(
+        "Smart Daily Assistant dirancang untuk membantu "
+        "aktivitas sehari-hari melalui teknologi Artificial "
+        "Intelligence yang mudah digunakan."
+    )
 
 
-# =====================================================
-# 10. MENAMPILKAN RIWAYAT CHAT
-# =====================================================
+# ==========================================
+# CHAT AI
+# ==========================================
 
-else:
+with tabs[1]:
 
-    st.markdown("### 💬 Percakapan Kamu")
+    st.markdown("## 💬 Chat dengan AI")
+
+    st.caption("Tanyakan apa saja dan dapatkan bantuan AI.")
 
     for message in st.session_state.messages:
 
         with st.chat_message(message["role"]):
-
             st.markdown(message["content"])
 
+    prompt = st.chat_input(
+        "Tulis pertanyaan kamu di sini...",
+        key="main_chat"
+    )
 
-# =====================================================
-# 11. INPUT CHAT
-# =====================================================
+    if prompt:
 
-prompt = st.chat_input(
-    "Tanyakan apa saja kepada Smart Daily Assistant..."
-)
+        history = get_history()
 
-# Memproses tombol pertanyaan cepat
-if st.session_state.pending_prompt:
+        add_message("user", prompt)
 
-    prompt = st.session_state.pending_prompt
-    st.session_state.pending_prompt = None
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+
+            with st.spinner("AI sedang berpikir..."):
+
+                try:
+
+                    answer, model = generate_answer(
+                        prompt,
+                        history
+                    )
+
+                    st.markdown(answer)
+
+                    st.caption(f"Model: {model}")
+
+                    add_message("assistant", answer)
+
+                except Exception as error:
+
+                    st.error(str(error))
+
+        st.rerun()
 
 
-# =====================================================
-# 12. PROSES PERTANYAAN DAN JAWABAN AI
-# =====================================================
+# ==========================================
+# ASISTEN BELAJAR
+# ==========================================
 
-if prompt:
+with tabs[2]:
 
-    # Simpan pesan pengguna
-    st.session_state.messages.append({
-        "role": "user",
-        "content": prompt
-    })
+    st.markdown("## 📚 Asisten Belajar")
 
-    with st.chat_message("user"):
+    st.write(
+        "Masukkan materi atau pertanyaan yang ingin kamu pelajari."
+    )
 
-        st.markdown(prompt)
+    with st.form("study_form"):
 
-    # Mengubah riwayat ke format Gemini
-    history = []
+        question = st.text_area(
+            "Materi atau pertanyaan",
+            placeholder="Contoh: Jelaskan pengertian algoritma..."
+        )
 
-    for message in st.session_state.messages:
+        submit = st.form_submit_button(
+            "✨ Pelajari Sekarang",
+            use_container_width=True
+        )
 
-        history.append({
-            "role": (
-                "model"
-                if message["role"] == "assistant"
-                else "user"
-            ),
-            "parts": [
-                {"text": message["content"]}
-            ]
-        })
+    if submit and question.strip():
 
-    # Memproses jawaban AI
-    with st.chat_message("assistant"):
-
-        with st.spinner(
-            "✨ Smart Daily Assistant sedang berpikir..."
-        ):
+        with st.spinner("Sedang menyiapkan penjelasan..."):
 
             try:
 
-                jawaban, model_dipakai = tanya_ai(history)
-
-                st.markdown(jawaban)
-
-                st.caption(
-                    f"🤖 Dijawab menggunakan {model_dipakai}"
+                answer, model = run_feature(
+                    "Belajar",
+                    question
                 )
 
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": jawaban
-                })
+                st.markdown("### 📖 Hasil Penjelasan")
+                st.markdown(answer)
+                st.caption(f"Model: {model}")
 
-            except Exception as e:
+            except Exception as error:
+                st.error(str(error))
 
-                pesan = str(e)
 
-                st.error(
-                    "Maaf, AI sedang mengalami gangguan. "
-                    "Silakan coba kembali beberapa saat lagi."
+# ==========================================
+# PEMBUAT LAPORAN
+# ==========================================
+
+with tabs[3]:
+
+    st.markdown("## 📝 Pembuat Laporan")
+
+    with st.form("report_form"):
+
+        topic = st.text_input(
+            "Judul atau tema laporan",
+            placeholder="Contoh: Perkembangan teknologi AI"
+        )
+
+        detail = st.text_area(
+            "Penjelasan tambahan",
+            placeholder="Tuliskan ketentuan laporan..."
+        )
+
+        submit = st.form_submit_button(
+            "📝 Buat Laporan",
+            use_container_width=True
+        )
+
+    if submit and topic.strip():
+
+        prompt = (
+            f"Buatkan laporan dengan tema: {topic}\n"
+            f"Ketentuan: {detail}\n"
+            "Susun secara sistematis dan formal."
+        )
+
+        with st.spinner("AI sedang membuat laporan..."):
+
+            try:
+
+                answer, model = run_feature(
+                    "Laporan",
+                    prompt
                 )
 
-                with st.expander("Lihat detail error"):
+                st.markdown("### 📄 Hasil Laporan")
+                st.markdown(answer)
 
-                    st.code(pesan)
+                st.download_button(
+                    "⬇️ Download TXT",
+                    data=answer,
+                    file_name="laporan_ai.txt",
+                    mime="text/plain"
+                )
 
-    st.rerun()
+                st.caption(f"Model: {model}")
+
+            except Exception as error:
+                st.error(str(error))
 
 
-# =====================================================
-# 13. FOOTER
-# =====================================================
+# ==========================================
+# PERANGKUM TEKS
+# ==========================================
 
-st.markdown(
-    """
-    <div class="footer">
-        🤖 Smart Daily Assistant
-        <br>
-        Powered by Python, Streamlit & Google Gemini AI
-        <br><br>
-        AI dapat melakukan kesalahan.
-        Periksa kembali informasi penting.
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+with tabs[4]:
+
+    st.markdown("## 📄 Perangkum Teks")
+
+    with st.form("summary_form"):
+
+        text_input = st.text_area(
+            "Masukkan teks yang ingin diringkas",
+            height=220,
+            placeholder="Tempel materi atau artikel di sini..."
+        )
+
+        submit = st.form_submit_button(
+            "✨ Ringkas Sekarang",
+            use_container_width=True
+        )
+
+    if submit and text_input.strip():
+
+        with st.spinner("Sedang meringkas teks..."):
+
+            try:
+
+                answer, model = run_feature(
+                    "Ringkas",
+                    text_input
+                )
+
+                st.markdown("### 📌 Hasil Ringkasan")
+                st.markdown(answer)
+
+                st.download_button(
+                    "⬇️ Download Ringkasan",
+                    data=answer,
+                    file_name="ringkasan.txt",
+                    mime="text/plain"
+                )
+
+            except Exception as error:
+                st.error(str(error))
+
+
+# ==========================================
+# PENERJEMAH
+# ==========================================
+
+with tabs[5]:
+
+    st.markdown("## 🌐 Penerjemah Bahasa")
+
+    with st.form("translate_form"):
+
+        language = st.selectbox(
+            "Terjemahkan ke bahasa",
+            [
+                "Bahasa Indonesia",
+                "Bahasa Inggris",
+                "Bahasa Jepang",
+                "Bahasa Korea",
+                "Bahasa Mandarin",
+                "Bahasa Arab"
+            ]
+        )
+
+        text_input = st.text_area(
+            "Teks yang ingin diterjemahkan",
+            height=180
+        )
+
+        submit = st.form_submit_button(
+            "🌐 Terjemahkan",
+            use_container_width=True
+        )
+
+    if submit and text_input.strip():
+
+        with st.spinner("Menerjemahkan..."):
+
+            try:
+
+                answer, model = translate_text(
+                    text_input,
+                    language
+                )
+
+                st.markdown("### Hasil Terjemahan")
+                st.markdown(answer)
+
+                st.download_button(
+                    "⬇️ Download Terjemahan",
+                    data=answer,
+                    file_name="terjemahan.txt",
+                    mime="text/plain"
+                )
+
+            except Exception as error:
+                st.error(str(error))
+
+
+# ==========================================
+# ASISTEN CODING
+# ==========================================
+
+with tabs[6]:
+
+    st.markdown("## 💻 Asisten Coding")
+
+    with st.form("coding_form"):
+
+        question = st.text_area(
+            "Apa yang ingin kamu buat atau perbaiki?",
+            height=180,
+            placeholder="Contoh: Buat program kalkulator menggunakan Python..."
+        )
+
+        submit = st.form_submit_button(
+            "🚀 Jalankan Asisten Coding",
+            use_container_width=True
+        )
+
+    if submit and question.strip():
+
+        with st.spinner("AI sedang menulis kode..."):
+
+            try:
+
+                answer, model = run_feature(
+                    "Coding",
+                    question
+                )
+
+                st.markdown("### 💻 Hasil Coding")
+                st.markdown(answer)
+
+            except Exception as error:
+                st.error(str(error))
+
+
+# ==========================================
+# FOOTER
+# ==========================================
+
+render_footer()
